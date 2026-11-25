@@ -30,6 +30,29 @@ theorem canWalkAvoiding_snoc {L : Level} {F : List Pos} {p q : Pos} (d : Dir)
     CanWalkAvoiding L F p (step q d) :=
   h.trans (CanWalkAvoiding.step d hw hf (CanWalkAvoiding.refl _))
 
+theorem canWalkAvoiding_symm {L : Level} {F : List Pos} {p q : Pos}
+    (hw : L.isWall p = false) (hf : p ∉ F)
+    (h : CanWalkAvoiding L F p q) : CanWalkAvoiding L F q p := by
+  induction h with
+  | refl => exact CanWalkAvoiding.refl _
+  | @step p' q' d hwd hfd _ ih =>
+    have ih' := ih hwd hfd
+    have hstep : step (step p' d) d.opp = p' := step_opp p' d
+    have hw' : L.isWall (step (step p' d) d.opp) = false := by rw [hstep]; exact hw
+    have hf' : step (step p' d) d.opp ∉ F := by rw [hstep]; exact hf
+    have hback : CanWalkAvoiding L F (step p' d) p' := by
+      have h1 := CanWalkAvoiding.step d.opp hw' hf' (CanWalkAvoiding.refl _)
+      rw [hstep] at h1
+      exact h1
+    exact ih'.trans hback
+
+theorem canWalkAvoiding_end_valid {L : Level} {F : List Pos} {p q : Pos}
+    (hw : L.isWall p = false) (hf : p ∉ F)
+    (h : CanWalkAvoiding L F p q) : L.isWall q = false ∧ q ∉ F := by
+  induction h with
+  | refl => exact ⟨hw, hf⟩
+  | step _ hwd hfd _ ih => exact ih hwd hfd
+
 /-- One BFS expansion step for player walkability avoiding walls and `F`. -/
 def walkStep (L : Level) (playable F reach : List Pos) : List Pos :=
   playable.filter (fun p =>
@@ -118,6 +141,50 @@ theorem canWalkAvoiding_mem_computeWalkable {L : Level} {playable F : List Pos}
       · rw [step_opp]
         exact List.contains_iff_mem.mpr hm1
     exact ih hp_step hm_step
+
+private theorem walkStep_preserves_canWalk {L : Level} {playable F : List Pos} {start : Pos}
+    (acc : List Pos) (hacc : ∀ x ∈ acc, CanWalkAvoiding L F start x) :
+    ∀ x ∈ walkStep L playable F acc, CanWalkAvoiding L F start x := by
+  intro p hp
+  simp only [walkStep, List.mem_filter, Bool.or_eq_true, Bool.and_eq_true, Bool.not_eq_true',
+    List.any_eq_true] at hp
+  rcases hp.2 with hmem | ⟨⟨hwp, hfp⟩, d, _, hd⟩
+  · exact hacc p (List.contains_iff_mem.mp hmem)
+  · have hstep_acc := hacc (step p d) (List.contains_iff_mem.mp hd)
+    have hnotF : p ∉ F := by
+      intro hm
+      have : F.contains p = true := List.contains_iff_mem.mpr hm
+      simp_all
+    have hback := canWalkAvoiding_snoc d.opp hstep_acc (by rw [step_opp]; exact hwp)
+      (by rw [step_opp]; exact hnotF)
+    rw [step_opp] at hback
+    exact hback
+
+theorem mem_computeWalkable_canWalkAvoiding {L : Level} {playable F : List Pos} {start q : Pos}
+    (hq : q ∈ computeWalkable L playable F start) :
+    CanWalkAvoiding L F start q := by
+  simp only [computeWalkable] at hq
+  let init := if playable.contains start && !L.isWall start && !F.contains start then [start] else []
+  have hinit : ∀ x ∈ init, CanWalkAvoiding L F start x := by
+    intro x hx
+    dsimp only [init] at hx
+    split at hx
+    · simp only [List.mem_singleton] at hx
+      rw [hx]
+      exact CanWalkAvoiding.refl _
+    · simp at hx
+  suffices h : ∀ fuel acc, (∀ x ∈ acc, CanWalkAvoiding L F start x) →
+      ∀ x ∈ iterFixedUp (walkStep L playable F) fuel acc, CanWalkAvoiding L F start x from
+    h playable.length init hinit q hq
+  intro fuel
+  induction fuel with
+  | zero => intro acc hacc x hx; exact hacc x hx
+  | succ n ih =>
+    intro acc hacc x hx
+    simp only [iterFixedUp] at hx
+    split at hx
+    · exact hacc x hx
+    · exact ih (walkStep L playable F acc) (walkStep_preserves_canWalk acc hacc) x hx
 
 /--
 Unified reachability-aware freeze predicate (`IsSuperFrozenSet`).

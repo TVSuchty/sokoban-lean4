@@ -76,13 +76,19 @@ Three plausible pruning mistakes are formalized and refuted constructively with 
 2. `naiveCurrentReachFreeze_unsound`: checking `CanWalkAvoiding` against *all* current boxes `s.boxes` instead of `F` fails on `cex2Board` (6×6, 4-move solution).
 3. `naiveGoalLock_unsound`: on `cex3Board` (8×4, 14-move solution), both permanently locking `*` on goal `(4,2)` (`lockGoalBoxesLevel`) and the weaker rule `StepNoOffGoalPush` (forbidding only pushes from a goal onto *non-goal floor*, since `(5,2)` is non-goal floor) render the board provably unsolvable.
 
+### 3.6 Verified PI-Corral & Corral-Merging Pruning (`Sokoban/PICorral.lean`, `Sokoban/PICorralCounterexamples.lean`)
+- **`ReachPushes L s₁ s₂ k`** tracks exact push counts alongside `Reach L`.
+- **`IsPICorral L live s₀ C B`** packages the enclosure invariant `hC_encl` (`wall ∪ B`), non-goal obligation `hUnsolved`, dead-square-aware I-condition `hICorral` (stripping `s₀.boxes \ B`), and P-condition `hPCorral` (retaining `s₀.boxes`). Because `hC_encl` only constrains `C` via `wall ∪ B`, single corrals and arbitrarily merged multi-room corrals satisfy the exact same predicate.
+- **`piCorral_push_optimal`**: splits any solved `k`-push trace at the first push `(b₀ ∈ B, d)` via `split_first_push_in_B` into a `B,C`-avoiding prefix (`ReachAvoidingBC`, length `k₁`) and suffix (`k₂`), shows `dest ∈ C` (`hICorral` + `reach_tracks_box` + `singleBoxReach_goal_mem_liveSquares`), walks from `b₀` back to `s₀.player` avoiding `moveBox s₀.boxes b₀ dest` (`canWalkAvoiding_symm` + `canWalkAvoiding_shifted`), replays the `k₁`-push prefix shifted by `moveBox_comm` (`replay_avoiding_shifted`), steps onto now-empty `b₀`, and finishes in `k₁ + k₂ = k - 1` pushes.
+- **Executable Finder & Bug Refutations**: `isPICorralBool_sound` lifts Boolean checks to `IsPICorral` via `mem_computeWalkable_canWalkAvoiding`; `findPICorral` greedily merges neighboring corral components; and `PICorralCounterexamples.lean` refutes forgetting to strip external boxes in the I-check (`picex1Board`), stripping external boxes in the P-check (`picex2Board`), and omitting `hUnsolved` (`picex3Board`).
+
 ---
 
 ## 4. Axiom & Trust Audit
 
 * Pure Lean 4 core (`leanprover/lean4:v4.37.0-rc1`), zero Mathlib dependency.
 * Zero `sorry`, `admit`, `native_decide`, `unsafe`, `implemented_by`, or custom `axiom` declarations.
-* All `#print axioms` checks in [`Sokoban/Examples.lean`](../Sokoban/Examples.lean) report exclusively:
+* All `#print axioms` checks in [`Sokoban/Examples.lean`](../Sokoban/Examples.lean) and [`Sokoban/PICorralCounterexamples.lean`](../Sokoban/PICorralCounterexamples.lean) report exclusively:
   ```text
   [propext, Classical.choice, Quot.sound]
   ```

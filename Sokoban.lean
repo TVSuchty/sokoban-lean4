@@ -5,3 +5,5 @@ import Sokoban.Freeze
 import Sokoban.Solver
 import Sokoban.Counterexamples
 import Sokoban.Examples
+import Sokoban.PICorral
+import Sokoban.PICorralCounterexamples

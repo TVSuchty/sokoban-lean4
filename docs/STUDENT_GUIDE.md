@@ -121,7 +121,43 @@ In `Sokoban/Counterexamples.lean`, we test three tempting heuristics (plausible 
 
 ---
 
-## 4. How Can You Trust the Proofs Without Reading Lean Code?
+---
+
+## 4. PI-Corral Pruning & Why Merging Is So Tricky (`Sokoban/PICorral.lean`)
+
+Strong Sokoban solvers (like YASS, JSoko, and SokoBoy) use **PI-Corral pruning** to cut huge chunks of the search tree—without losing push-optimality.
+
+### What Is a PI-Corral?
+Suppose some boxes `B` seal off an area `C` that the player cannot reach (a **corral**), and at least one box in `B` is not on a goal yet:
+1. **I-Corral ("push-in only"):** Ignoring external boxes outside `B`, every live push of a box in `B` from outside `C` goes **into** `C`.
+2. **P-Corral ("player ready"):** Avoiding *all* current boxes, the player can already reach the pushing side of every such inward push.
+
+Our theorem **`piCorral_push_optimal`** proves: if you have a valid PI-Corral (even one built by **merging** multiple adjacent pockets!), at least one shortest-push solution starts by immediately pushing one of `B`'s boxes into `C`—you can safely ignore all pushes elsewhere on the board!
+
+### Merged-Only Showcase (`exMergedPICorral_verified`)
+```text
+######
+## .##   <- Pocket 1: (2,1),(3,1),(3,2)
+# # ##
+#* $ #   <- Pocket 2: (4,3)
+#  @*#
+######
+```
+* Neither pocket alone is a PI-Corral (box `(3,3)` can be pushed right into Pocket 2 from Pocket 1's view, and up into Pocket 1 from Pocket 2's view).
+* **Merging** them gives one valid PI-Corral `(C, B)` that immediately forces pushing `(3,3)` up twice (`up, up` — 2 pushes, optimal!).
+
+### The Surprising Asymmetry: Which Boxes Do You Hide? (`PICorralCounterexamples.lean`)
+In solver blogs and repos (like YASS / SokoBoy), authors specifically struggle with which external boxes `s₀.boxes \ B` to strip during merging and checking. Lean proves both mistakes break soundness:
+1. **Forgetting to strip external boxes in the I-check (`picex1Board`):**
+   An external box at `(2,2)` temporarily blocks `(3,2)` from being pushed outward, making a non-PI-Corral look like a PI-Corral—and the sole inward push `((2,4), .right)` causes an immediate unsolvable state, pruning the 4-move winning line!
+2. **Stripping external boxes in the P-check (`picex2Board`):**
+   Hiding an external box at `(2,1)` makes `(3,4)` look reachable when the player is actually blocked—producing `0` executable inward pushes and a false dynamic deadlock on a 5-move solvable board!
+3. **Forgetting the unsolved-box check (`picex3Board`):**
+   An already-solved box `*` at `(4,3)` encloses `(4,4)` with `0` executable inward pushes—triggering a false deadlock on a 3-move solvable puzzle!
+
+---
+
+## 5. How Can You Trust the Proofs Without Reading Lean Code?
 
 You only need to read **~40 lines** in [`Sokoban/Defs.lean`](../Sokoban/Defs.lean) to audit what our theorems mean:
 1. `Step`: defines legal `walk` and `push` moves.
