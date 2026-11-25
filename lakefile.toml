@@ -1,0 +1,11 @@
+name = "sokoban-lean4"
+version = "0.1.0"
+keywords = ["sokoban", "formal-verification", "deadlock", "planning"]
+defaultTargets = ["Sokoban"]
+
+[leanOptions]
+pp.unicode.fun = true
+relaxedAutoImplicit = false
+
+[[lean_lib]]
+name = "Sokoban"
