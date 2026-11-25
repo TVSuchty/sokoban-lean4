@@ -29,6 +29,21 @@ A standalone, zero-dependency Lean 4 formalization (`leanprover/lean4:v4.37.0-rc
 
 ---
 
+## What Is This Good For?
+
+1. **Reference Specification & Regression Suite for Sokoban Solver Authors:**
+   Deadlock and corral rules are notorious for subtle false positives when implemented informally. This repository provides machine-checked reference predicates (`isSuperFreezeDeadlock`, `isPICorralBool`) alongside **6 minimal counterexample boards** (`cex1`–`cex3`, `picex1`–`picex3`) and a **merged-only PI-Corral test case** (`exMergedBoard`)—making the YASS/SokoBoy external-box asymmetry explicit (strip external boxes in the I-check, keep them in the P-check).
+2. **Independent Referee for Disputed Small Boards:**
+   If two solvers disagree on a tricky small puzzle, you can replay a candidate solution (`verifySolution`) or check an unsolvability witness (`checkUnsolvableCert`) directly in Lean's kernel without trusting the search engine that produced it.
+3. **Teaching & Learning Formal Verification (Pure Lean 4, Zero Mathlib):**
+   Builds in seconds with no Mathlib download and pairs every theorem with visual ASCII boards. Useful as a self-contained case study for finite fixed-point combinators (`Fixpoint.lean`), inductive reachability invariants (`Freeze.lean`), push-optimality commutation (`PICorral.lean`), and certifying search (`Solver.lean`).
+4. **Reusable Foundation for Further Sokoban Verification:**
+   The tiny Trusted Computing Base in [`Sokoban/Defs.lean`](Sokoban/Defs.lean) is ready to extend with bipartite-matching deadlocks, tunnel/goal-room macros, or a standalone CLI certificate checker for external Rust/C++ solvers.
+
+> **Scope Note:** `solveBFS` is a small, kernel-executable certifying BFS meant for verification and small counterexample checks—not a high-performance solver for large Sokoban level packs.
+
+---
+
 ## Modules
 
 | Module | Contents |
