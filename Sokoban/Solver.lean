@@ -36,10 +36,11 @@ theorem stateEquivBool_sound {s₁ s₂ : State} (h : stateEquivBool s₁ s₂ =
                         fun hb => List.contains_iff_mem.mp (h21 b hb)⟩⟩
 
 theorem StateEquiv.preserves_valid {L : Level} {s₁ s₂ : State}
-    (heq : StateEquiv s₁ s₂) (hv : ValidState L s₁) : ValidState L s₂ := by
+    (heq : StateEquiv s₁ s₂) (hv : ValidState L s₁) (hnd₂ : s₂.boxes.Nodup) :
+    ValidState L s₂ := by
   rcases heq with ⟨hp, hboxes⟩
-  rcases hv with ⟨hwp, hpb, hwb⟩
-  refine ⟨hp ▸ hwp, ?_, ?_⟩
+  rcases hv with ⟨hwp, hpb, hwb, _⟩
+  refine ⟨hp ▸ hwp, ?_, ?_, hnd₂⟩
   · intro hmem
     exact hpb ((hboxes s₂.player).mpr (hp ▸ hmem) |> fun h => hp ▸ h)
   · intro b hb
@@ -96,89 +97,131 @@ theorem Step.preserves_playable {L : Level} {playable : List Pos}
     · exact hclosed _ (hbox _ hb) d hw
     · exact hbox b hb_old
 
+/-- Certificate witnessing unsolvability of a Sokoban state. -/
+inductive UnsolvableCert where
+  | initialDeadlock
+  | closedRegion (visited : List State)
+  deriving Repr, DecidableEq
+
+/-- Checks all structural premises required for sound deadlock/certificate verification. -/
+def checkBoardPremises (L : Level) (playable : List Pos) (s₀ : State) : Bool :=
+  isValidStateBool L s₀ &&
+  isNodupPos playable &&
+  isClosedPlayable L playable &&
+  playable.contains s₀.player &&
+  s₀.boxes.all (fun b => playable.contains b)
+
+theorem checkBoardPremises_sound {L : Level} {playable : List Pos} {s₀ : State}
+    (h : checkBoardPremises L playable s₀ = true) :
+    ValidState L s₀ ∧ playable.Nodup ∧ ClosedPlayable L playable ∧
+    s₀.player ∈ playable ∧ (∀ b ∈ s₀.boxes, b ∈ playable) := by
+  simp only [checkBoardPremises, Bool.and_eq_true, List.all_eq_true] at h
+  rcases h with ⟨⟨⟨⟨hv, hnd⟩, hcl⟩, hpl⟩, hbox⟩
+  exact ⟨isValidStateBool_sound hv, isNodupPos_sound hnd, isClosedPlayable_sound hcl,
+    List.contains_iff_mem.mp hpl, fun b hb => List.contains_iff_mem.mp (hbox b hb)⟩
+
 /--
 Standalone, kernel-checkable unsolvability certificate verifier.
-Checks that `visited` is a closed state-space invariant (modulo `StateEquiv`) starting from `s₀`:
-1. `s₀` is represented in `visited`,
-2. no state in `visited` is solved, and
-3. every legal transition from a state in `visited` leads either to a verified Super-Freeze deadlock
-   or back into `visited`.
+Validates `checkBoardPremises L playable s₀` internally, then checks:
+- `.initialDeadlock`: `s₀` is immediately flagged by `isSuperFreezeDeadlockWithLive`, or
+- `.closedRegion visited`: `visited` has duplicate-free box lists, represents `s₀`, contains no
+  solved state, and every legal `execDir` successor of every state in `visited` either triggers
+  `isSuperFreezeDeadlockWithLive` or maps back into `visited` modulo `StateEquiv`.
 -/
-def checkUnsolvableCert (L : Level) (playable : List Pos) (s₀ : State) (visited : List State) : Bool :=
-  let live := computeLiveSquares L playable
-  visited.any (stateEquivBool s₀) &&
-  visited.all (fun s => !isSolvedBool L s) &&
-  visited.all (fun s =>
-    Dir.all.all (fun d =>
-      match execDir L s d with
-      | none => true
-      | some s' => isSuperFreezeDeadlockWithLive L playable live s' || visited.any (stateEquivBool s')))
+def checkUnsolvableCert (L : Level) (playable : List Pos) (s₀ : State)
+    (cert : UnsolvableCert) : Bool :=
+  if !checkBoardPremises L playable s₀ then false
+  else
+    let live := computeLiveSquares L playable
+    match cert with
+    | .initialDeadlock => isSuperFreezeDeadlockWithLive L playable live s₀
+    | .closedRegion visited =>
+      visited.all (fun s => isNodupPos s.boxes) &&
+      visited.any (stateEquivBool s₀) &&
+      visited.all (fun s => !isSolvedBool L s) &&
+      visited.all (fun s =>
+        Dir.all.all (fun d =>
+          match execDir L s d with
+          | none => true
+          | some s' =>
+            isSuperFreezeDeadlockWithLive L playable live s' ||
+            visited.any (stateEquivBool s')))
 
-theorem checkUnsolvableCert_sound {L : Level} {playable : List Pos} {s₀ : State} {visited : List State}
-    (hv : ValidState L s₀) (hp : playable.Nodup) (hclosed : ClosedPlayable L playable)
-    (hpl : s₀.player ∈ playable) (hbox : ∀ b ∈ s₀.boxes, b ∈ playable)
-    (hcert : checkUnsolvableCert L playable s₀ visited = true) :
+theorem checkUnsolvableCert_sound {L : Level} {playable : List Pos} {s₀ : State}
+    {cert : UnsolvableCert}
+    (hcert : checkUnsolvableCert L playable s₀ cert = true) :
     ¬ Solvable L s₀ := by
-  simp only [checkUnsolvableCert, Bool.and_eq_true, List.any_eq_true, List.all_eq_true,
-    Bool.not_eq_true'] at hcert
-  rcases hcert with ⟨⟨⟨sv₀, hsv₀_mem, hsv₀_eq⟩, hnone_sol⟩, hclosed_vis⟩
-  rintro ⟨s_end, hr, hend⟩
-  suffices h : ∀ {s₁ s₂ : State}, Reach L s₁ s₂ →
-      ∀ sv ∈ visited, StateEquiv s₁ sv →
-      ValidState L s₁ → s₁.player ∈ playable → (∀ b ∈ s₁.boxes, b ∈ playable) →
-      ¬ IsSolved L s₂ by
-    exact h hr sv₀ hsv₀_mem (stateEquivBool_sound hsv₀_eq) hv hpl hbox hend
-  intro s₁ s₂ hr₁₂
-  induction hr₁₂ with
-  | refl s₁ =>
-    intro sv hsv_mem heq _ _ _ hsol
-    have hsol_v := heq.preserves_solved hsol
-    have hb_v : isSolvedBool L sv = false := hnone_sol sv hsv_mem
-    have htrue : isSolvedBool L sv = true := by
-      simp only [isSolvedBool, List.all_eq_true]
-      exact hsol_v
-    simp_all
-  | @step s₁ s₂ s₃ hs hr₂₃ ih =>
-    intro sv hsv_mem heq hv₁ hpl₁ hbox₁ hsol₃
-    have hv₂ := hs.preserves_valid hv₁
-    have hplay₂ := hs.preserves_playable hclosed hpl₁ hbox₁
-    have hv_v := heq.preserves_valid hv₁
-    rcases heq.preserves_step hs with ⟨sv', hsv_step, heq'⟩
-    rcases step_implies_execDir hv_v hsv_step with ⟨d, hd⟩
-    have hbranch := hclosed_vis sv hsv_mem d (Dir.mem_all d)
-    simp only [hd, Bool.or_eq_true, List.any_eq_true] at hbranch
-    rcases hbranch with hdead | ⟨sv₂, hsv₂_mem, heq₂_bool⟩
-    · have hv_v' : ValidState L sv' := heq'.preserves_valid hv₂
-      have hpl_v' : sv'.player ∈ playable := heq'.1 ▸ hplay₂.1
-      have hbox_v' : ∀ b ∈ sv'.boxes, b ∈ playable := fun b hb => hplay₂.2 b ((heq'.2 b).mpr hb)
-      have hnot : ¬ Solvable L sv' :=
-        superFreezeDeadlockWithLive_sound hv_v' hp hclosed hpl_v' hbox_v' hdead
-      have hsol_s₂ : Solvable L s₂ := ⟨s₃, hr₂₃, hsol₃⟩
-      exact hnot (heq'.preserves_solvable hsol_s₂)
-    · exact ih sv₂ hsv₂_mem (heq'.trans (stateEquivBool_sound heq₂_bool)) hv₂ hplay₂.1 hplay₂.2 hsol₃
+  simp only [checkUnsolvableCert] at hcert
+  cases hprem : checkBoardPremises L playable s₀
+  · simp [hprem] at hcert
+  · simp only [hprem, Bool.not_true, Bool.false_eq_true, ↓reduceIte] at hcert
+    rcases checkBoardPremises_sound hprem with ⟨hv, hp, hclosed, hpl, hbox⟩
+    cases cert with
+    | initialDeadlock =>
+      exact superFreezeDeadlockWithLive_sound hv hp hclosed hpl hbox hcert
+    | closedRegion visited =>
+      simp only [Bool.and_eq_true, List.any_eq_true, List.all_eq_true,
+        Bool.not_eq_true'] at hcert
+      rcases hcert with ⟨⟨⟨hvis_nd, ⟨sv₀, hsv₀_mem, hsv₀_eq⟩⟩, hnone_sol⟩, hclosed_vis⟩
+      rintro ⟨s_end, hr, hend⟩
+      suffices h : ∀ {s₁ s₂ : State}, Reach L s₁ s₂ →
+          ∀ sv ∈ visited, StateEquiv s₁ sv →
+          ValidState L s₁ → s₁.player ∈ playable → (∀ b ∈ s₁.boxes, b ∈ playable) →
+          ¬ IsSolved L s₂ by
+        exact h hr sv₀ hsv₀_mem (stateEquivBool_sound hsv₀_eq) hv hpl hbox hend
+      intro s₁ s₂ hr₁₂
+      induction hr₁₂ with
+      | refl s₁ =>
+        intro sv hsv_mem heq _ _ _ hsol
+        have hsol_v := heq.preserves_solved hsol
+        have hb_v : isSolvedBool L sv = false := hnone_sol sv hsv_mem
+        have htrue : isSolvedBool L sv = true := by
+          simp only [isSolvedBool, List.all_eq_true]
+          exact hsol_v
+        simp_all
+      | @step s₁ s₂ s₃ hs hr₂₃ ih =>
+        intro sv hsv_mem heq hv₁ hpl₁ hbox₁ hsol₃
+        have hv₂ := hs.preserves_valid hv₁
+        have hplay₂ := hs.preserves_playable hclosed hpl₁ hbox₁
+        have hv_v := heq.preserves_valid hv₁ (isNodupPos_sound (hvis_nd sv hsv_mem))
+        rcases heq.preserves_step hs with ⟨sv', hsv_step, heq'⟩
+        rcases step_implies_execDir hv_v hsv_step with ⟨d, hd⟩
+        have hbranch := hclosed_vis sv hsv_mem d (Dir.mem_all d)
+        simp only [hd, Bool.or_eq_true, List.any_eq_true] at hbranch
+        rcases hbranch with hdead | ⟨sv₂, hsv₂_mem, heq₂_bool⟩
+        · have hv_v' : ValidState L sv' :=
+            (execDir_sound hd).preserves_valid hv_v
+          have hpl_v' : sv'.player ∈ playable := heq'.1 ▸ hplay₂.1
+          have hbox_v' : ∀ b ∈ sv'.boxes, b ∈ playable := fun b hb => hplay₂.2 b ((heq'.2 b).mpr hb)
+          have hnot : ¬ Solvable L sv' :=
+            superFreezeDeadlockWithLive_sound hv_v' hp hclosed hpl_v' hbox_v' hdead
+          have hsol_s₂ : Solvable L s₂ := ⟨s₃, hr₂₃, hsol₃⟩
+          exact hnot (heq'.preserves_solvable hsol_s₂)
+        · exact ih sv₂ hsv₂_mem (heq'.trans (stateEquivBool_sound heq₂_bool)) hv₂ hplay₂.1 hplay₂.2 hsol₃
 
 /-- Result of the deadlock-pruned Sokoban BFS solver. -/
 inductive SolveResult where
   | solved (moves : List Dir)
-  | unsolvable (visited : List State)
+  | unsolvable (cert : UnsolvableCert)
   | outOfFuel
   deriving Repr, DecidableEq
 
 /--
 Deadlock-pruned Breadth-First Search (BFS) solver using `isSuperFreezeDeadlockWithLive`.
-When returning `.unsolvable visited`, `visited` is an unsolvability certificate for `checkUnsolvableCert`.
+Returns `.unsolvable .initialDeadlock` on an initial deadlock, or `.unsolvable (.closedRegion visited)`
+when the pruned search exhausts all states.
 -/
 def solveBFS (L : Level) (playable : List Pos) (fuel : Nat) (s₀ : State) : SolveResult :=
   let live := computeLiveSquares L playable
   if isSolvedBool L s₀ then .solved []
-  else if isSuperFreezeDeadlockWithLive L playable live s₀ then .unsolvable []
+  else if isSuperFreezeDeadlockWithLive L playable live s₀ then .unsolvable .initialDeadlock
   else
     let rec go (f : Nat) (queue : List (State × List Dir)) (visited : List State) : SolveResult :=
       match f with
       | 0 => .outOfFuel
       | f' + 1 =>
         match queue with
-        | [] => .unsolvable visited
+        | [] => .unsolvable (.closedRegion visited)
         | (s, revPath) :: rest =>
           let stepDir (acc : List (State × List Dir) × List State × Option (List Dir)) (d : Dir) :=
             match acc.2.2 with
@@ -201,10 +244,7 @@ def solveBFS (L : Level) (playable : List Pos) (fuel : Nat) (s₀ : State) : Sol
           | none => go f' (rest ++ newItems) visited'
     go fuel [(s₀, [])] [s₀]
 
-/--
-Verified wrapper: checks any `.solved` solution via `applyMoves` and any `.unsolvable` certificate
-via `checkUnsolvableCert`.
--/
+/-- Verify a candidate move list against `L` and `s₀` via `applyMoves`. -/
 def verifySolution (L : Level) (s₀ : State) (moves : List Dir) : Bool :=
   match applyMoves L s₀ moves with
   | none => false
@@ -218,5 +258,21 @@ theorem verifySolution_sound {L : Level} {s₀ : State} {moves : List Dir}
   | some s' =>
     simp [hm] at h
     exact solvable_of_applyMoves hm h
+
+/-- Unified verifier for `SolveResult`: checks `.solved` traces and `.unsolvable` certificates. -/
+def verifySolveResult (L : Level) (playable : List Pos) (s₀ : State) : SolveResult → Bool
+  | .solved moves => verifySolution L s₀ moves
+  | .unsolvable cert => checkUnsolvableCert L playable s₀ cert
+  | .outOfFuel => false
+
+theorem verifySolveResult_solved_sound {L : Level} {playable : List Pos} {s₀ : State}
+    {moves : List Dir}
+    (h : verifySolveResult L playable s₀ (.solved moves) = true) : Solvable L s₀ :=
+  verifySolution_sound h
+
+theorem verifySolveResult_unsolvable_sound {L : Level} {playable : List Pos} {s₀ : State}
+    {cert : UnsolvableCert}
+    (h : verifySolveResult L playable s₀ (.unsolvable cert) = true) : ¬ Solvable L s₀ :=
+  checkUnsolvableCert_sound h
 
 end Sokoban

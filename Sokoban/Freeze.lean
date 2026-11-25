@@ -213,7 +213,7 @@ theorem superFreeze_sound {L : Level} {playable : List Pos} {s₀ : State} {F : 
           dsimp only [b₀, dest]
           exact (mem_moveBox hbox_step).mpr (.inr ⟨hb_old, hne⟩)
         have hwalk₂ : CanWalkAvoiding L F s₀.player b₀ :=
-          canWalkAvoiding_snoc d hwalk₁ (hv₁.2.2 b₀ hbox_step) hb₀F
+          canWalkAvoiding_snoc d hwalk₁ (hv₁.2.2.1 b₀ hbox_step) hb₀F
         exact ih hv₂ hpl₂ hbox₂ hF₂ hwalk₂ hsol₃
 
 /-- Boolean check whether pushing box `b` in direction `d` is blocked relative to `F`, `live`, `walkable`. -/

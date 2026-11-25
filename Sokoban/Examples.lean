@@ -22,9 +22,17 @@ def exCornerBoard : List String :=
 
 def exCornerLevel : Level := (parseLevel exCornerBoard).1
 def exCornerState : State := (parseLevel exCornerBoard).2.1
+def exCornerPlayable : List Pos := (parseLevel exCornerBoard).2.2
 
 theorem exCorner_deadlock : ¬ Solvable exCornerLevel exCornerState :=
   cornerDeadlock_sound (isValidStateBool_sound (by decide)) (by decide)
+
+theorem exCorner_bfs_cert_verified :
+    solveBFS exCornerLevel exCornerPlayable 200 exCornerState = .unsolvable .initialDeadlock ∧
+    checkUnsolvableCert exCornerLevel exCornerPlayable exCornerState .initialDeadlock = true ∧
+    ¬ Solvable exCornerLevel exCornerState := by
+  refine ⟨by decide, by decide, ?_⟩
+  exact checkUnsolvableCert_sound (playable := exCornerPlayable) (cert := .initialDeadlock) (by decide)
 
 -- ============================================================================
 -- Example 2: 2×2 Block Deadlock
@@ -161,7 +169,8 @@ def extractMoves : SolveResult → List Dir
   | _ => []
 
 theorem exSolvable_verified :
-    (solveBFS exSolvableLevel exSolvablePlayable 200 exSolvableState ≠ .outOfFuel) ∧
+    verifySolveResult exSolvableLevel exSolvablePlayable exSolvableState
+      (solveBFS exSolvableLevel exSolvablePlayable 200 exSolvableState) = true ∧
     Solvable exSolvableLevel exSolvableState := by
   refine ⟨by decide, ?_⟩
   exact verifySolution_sound
@@ -188,22 +197,26 @@ def exUnsolvableLevel : Level := (parseLevel exUnsolvableBoard).1
 def exUnsolvableState : State := (parseLevel exUnsolvableBoard).2.1
 def exUnsolvablePlayable : List Pos := (parseLevel exUnsolvableBoard).2.2
 
-def extractCert : SolveResult → List State
-  | .unsolvable v => v
-  | _ => []
+def extractCert : SolveResult → UnsolvableCert
+  | .unsolvable cert => cert
+  | _ => .closedRegion []
 
 theorem exUnsolvable_verified :
     isSuperFreezeDeadlock exUnsolvableLevel exUnsolvablePlayable exUnsolvableState = false ∧
+    checkUnsolvableCert exUnsolvableLevel exUnsolvablePlayable exUnsolvableState
+      (extractCert (solveBFS exUnsolvableLevel exUnsolvablePlayable 200 exUnsolvableState)) = true ∧
     ¬ Solvable exUnsolvableLevel exUnsolvableState := by
-  refine ⟨by decide, ?_⟩
+  refine ⟨by decide, by decide, ?_⟩
   exact checkUnsolvableCert_sound
-    (isValidStateBool_sound (by decide))
-    (by decide)
-    (isClosedPlayable_sound (by decide))
-    (by decide)
-    (by decide)
     (by decide : checkUnsolvableCert exUnsolvableLevel exUnsolvablePlayable exUnsolvableState
       (extractCert (solveBFS exUnsolvableLevel exUnsolvablePlayable 200 exUnsolvableState)) = true)
+
+/-- All 10 bundled example and counterexample boards pass the strict XSB parser. -/
+theorem all_boards_parseLevelStrict :
+    [ exCornerBoard, ex2x2Board, exDeadSqBoard, exZigZagBoard, exPlayerTrapBoard,
+      exSolvableBoard, exUnsolvableBoard, cex1Board, cex2Board, cex3Board ].all
+        (fun b => (parseLevelStrict b).isSome) = true := by
+  decide
 
 -- ============================================================================
 -- Axiom Audit
@@ -215,10 +228,14 @@ theorem exUnsolvable_verified :
 #print axioms superFreezeDeadlock_sound
 #print axioms checkUnsolvableCert_sound
 #print axioms verifySolution_sound
+#print axioms verifySolveResult_solved_sound
+#print axioms verifySolveResult_unsolvable_sound
 #print axioms naiveDeadSquareFreeze_unsound
 #print axioms naiveCurrentReachFreeze_unsound
 #print axioms naiveGoalLock_unsound
+#print axioms exCorner_bfs_cert_verified
 #print axioms exSolvable_verified
 #print axioms exUnsolvable_verified
+#print axioms all_boards_parseLevelStrict
 
 end Sokoban

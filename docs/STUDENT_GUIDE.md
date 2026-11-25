@@ -18,7 +18,7 @@ So solver authors invent **deadlock detectors**: fast checks that look at a boar
 
 ### The Catch: A Single False Positive Destroys Everything
 A deadlock detector has one non-negotiable job: **Soundness**.
-* If it says **"Deadlock"** on a state that is actually still solvable, the solver throws away the winning path and falsely claims the puzzle is impossible!
+* If it says **"Deadlock"** on a state whose remaining winning paths all pass through it (or on the only winning path), the solver throws away every winning continuation and falsely claims the puzzle is impossible!
 * On the other hand, saying **"Not sure"** (`false`) on a hopeless state is safe (it just means the solver keeps searching a bit longer).
 
 This is why informal "obvious" heuristics are dangerous in Sokoban—and why formalizing them in Lean 4 is so rewarding!
@@ -42,8 +42,8 @@ Even ignoring all other boxes, no box can ever be pushed into a goal if it is pi
 ```text
 ######
 #@ $ #  <- Box $ is NOT in a corner (left and right are empty!).
-# ## #     Yet every square on the top row has walls above & below,
-#  . #     and the corners at both ends are dead.
+# ## #     Yet the continuous wall ABOVE prevents pushing any box down
+#  . #     off the top row, and the corners at both ends are dead.
 ######
 ```
 Using backward Breadth-First Search (`computeLiveSquares`) from all goals, we compute every square from which a single box *could* reach a goal even if all other boxes vanished. Any square outside `live` is a **Simple Dead Square**. If any box sits on one, the state is provably unsolvable.
@@ -84,7 +84,7 @@ Our unified theorem **`superFreeze_sound`** handles all four blocking reasons si
 
 ## 3. Three "Obvious" Heuristics—and Lean's Counterexamples!
 
-In `Sokoban/Counterexamples.lean`, we test three tempting heuristics that people often implement in solvers, and let Lean **prove all three are wrong**:
+In `Sokoban/Counterexamples.lean`, we test three tempting heuristics (plausible solver-pruning mistakes) and let Lean **prove all three are wrong**:
 
 ### Counterexample 1: "Treat Simple Dead Squares Like Walls on Both Sides" (`naiveDeadSquareFreeze_unsound`)
 ```text
@@ -111,13 +111,13 @@ In `Sokoban/Counterexamples.lean`, we test three tempting heuristics that people
 
 ### Counterexample 3: "Never Push a Box Off a Goal" (`naiveGoalLock_unsound`)
 ```text
-#######
-#   ###
-#@$ *.#
-#######
+########
+#   ####
+#@$ * .#
+########
 ```
-* Box `*` is already sitting on a goal! Treating `*` as a permanent wall makes the remaining box `$` mathematically unsolvable (proved in Lean!).
-* **Why it's wrong:** In real Sokoban, you walk around the top bypass, push `*` one step right onto `.`, and then push `$` into the newly vacated goal (12 moves total).
+* Box `*` is already sitting on goal `(4,2)`! Treating `*` as a permanent wall—or even just forbidding pushes from a goal onto *non-goal floor* (`StepNoOffGoalPush`)—makes the puzzle mathematically unsolvable (both proved in Lean!).
+* **Why it's wrong:** In real Sokoban, you walk around the top bypass, push `*` off `(4,2)` onto the non-goal floor `(5,2)` and then onto `.` at `(6,2)`, and finally push `$` into the vacated goal `(4,2)` (14 moves total).
 
 ---
 

@@ -59,9 +59,26 @@ structure State where
   boxes : List Pos
   deriving DecidableEq, Repr, BEq
 
-/-- State validity invariant: player and boxes are off walls, and player is not on a box. -/
+/-- Executable duplicate-free check on position lists. -/
+def isNodupPos : List Pos → Bool
+  | [] => true
+  | x :: xs => !xs.contains x && isNodupPos xs
+
+theorem isNodupPos_sound {xs : List Pos} (h : isNodupPos xs = true) : xs.Nodup := by
+  induction xs with
+  | nil => simp
+  | cons a as ih =>
+    simp only [isNodupPos, Bool.and_eq_true, Bool.not_eq_true'] at h
+    simp only [List.nodup_cons]
+    refine ⟨?_, ih h.2⟩
+    intro hmem
+    have : as.contains a = true := List.contains_iff_mem.mpr hmem
+    simp_all
+
+/-- State validity invariant: player and boxes are off walls, player is not on a box, and boxes are distinct. -/
 def ValidState (L : Level) (s : State) : Prop :=
-  L.isWall s.player = false ∧ s.player ∉ s.boxes ∧ ∀ b ∈ s.boxes, L.isWall b = false
+  L.isWall s.player = false ∧ s.player ∉ s.boxes ∧
+  (∀ b ∈ s.boxes, L.isWall b = false) ∧ s.boxes.Nodup
 
 /-- Replace box coordinate `b` with `b'` in `bs`. -/
 def moveBox (bs : List Pos) (b b' : Pos) : List Pos :=
@@ -96,6 +113,40 @@ theorem moveBox_not_mem_old {bs : List Pos} {b b' : Pos} (hne : b ≠ b') :
     simp [hbeq] at hy
     exact hyb hy
 
+theorem moveBox_nodup {bs : List Pos} {b b' : Pos}
+    (hnd : bs.Nodup) (hnb : b' ∉ bs) : (moveBox bs b b').Nodup := by
+  induction bs with
+  | nil => simp [moveBox]
+  | cons a as ih =>
+    simp only [List.nodup_cons] at hnd
+    have hnb_a : b' ≠ a := fun heq => hnb (heq ▸ by simp)
+    have hnb_as : b' ∉ as := fun hm => hnb (by simp [hm])
+    simp only [moveBox, List.map_cons, List.nodup_cons]
+    by_cases hab : a = b
+    · subst hab
+      simp only [beq_self_eq_true, ↓reduceIte]
+      refine ⟨?_, ih hnd.2 hnb_as⟩
+      intro hmem
+      simp only [List.mem_map] at hmem
+      rcases hmem with ⟨y, hy, hy_eq⟩
+      have hne : y ≠ a := fun heq => hnd.1 (heq ▸ hy)
+      have hbeq : (y == a) = false := beq_false_of_ne hne
+      simp only [hbeq, Bool.false_eq_true, ↓reduceIte] at hy_eq
+      exact hnb_as (hy_eq ▸ hy)
+    · have hbeq : (a == b) = false := beq_false_of_ne hab
+      simp only [hbeq, Bool.false_eq_true, ↓reduceIte]
+      refine ⟨?_, ih hnd.2 hnb_as⟩
+      intro hmem
+      simp only [List.mem_map] at hmem
+      rcases hmem with ⟨y, hy, hy_eq⟩
+      by_cases hyb : y = b
+      · subst hyb
+        simp only [beq_self_eq_true, ↓reduceIte] at hy_eq
+        exact hnb_a hy_eq
+      · have hbeqy : (y == b) = false := beq_false_of_ne hyb
+        simp only [hbeqy, Bool.false_eq_true, ↓reduceIte] at hy_eq
+        exact hnd.1 (hy_eq ▸ hy)
+
 /-- Single legal Sokoban transition (walk or push). -/
 inductive Step (L : Level) : State → State → Prop where
   | walk (d : Dir) (s : State)
@@ -112,12 +163,12 @@ inductive Step (L : Level) : State → State → Prop where
 
 theorem Step.preserves_valid {L : Level} {s₁ s₂ : State}
     (hv : ValidState L s₁) (hs : Step L s₁ s₂) : ValidState L s₂ := by
-  rcases hv with ⟨hwp, hpb, hwb⟩
+  rcases hv with ⟨hwp, hpb, hwb, hnd⟩
   cases hs with
   | walk d s hw hb =>
-    exact ⟨hw, hb, hwb⟩
+    exact ⟨hw, hb, hwb, hnd⟩
   | push d s hb hw hnb =>
-    refine ⟨hwb _ hb, ?_, ?_⟩
+    refine ⟨hwb _ hb, ?_, ?_, moveBox_nodup hnd hnb⟩
     · exact moveBox_not_mem_old (step_ne _ d).symm
     · intro b hmem
       rw [mem_moveBox hb] at hmem
@@ -211,7 +262,7 @@ theorem step_implies_execDir {L : Level} {s s' : State}
     simp [execDir, hw, hb]
   | push d s hb hw hnb =>
     refine ⟨d, ?_⟩
-    have hwp : L.isWall (step s.player d) = false := hv.2.2 _ hb
+    have hwp : L.isWall (step s.player d) = false := hv.2.2.1 _ hb
     simp [execDir, hwp, hb, hw, hnb]
 
 /-- Execute a list of moves. -/
@@ -251,15 +302,16 @@ theorem solvable_of_applyMoves {L : Level} {s s' : State} {ms : List Dir}
     Solvable L s :=
   ⟨s', applyMoves_sound hm, isSolvedBool_sound hs⟩
 
-/-- Boolean validity check for concrete states. -/
+/-- Boolean validity check for concrete states (including duplicate-free boxes). -/
 def isValidStateBool (L : Level) (s : State) : Bool :=
-  !L.isWall s.player && !s.boxes.contains s.player && s.boxes.all (fun b => !L.isWall b)
+  !L.isWall s.player && !s.boxes.contains s.player &&
+  s.boxes.all (fun b => !L.isWall b) && isNodupPos s.boxes
 
 theorem isValidStateBool_sound {L : Level} {s : State} (h : isValidStateBool L s = true) :
     ValidState L s := by
   simp only [isValidStateBool, Bool.and_eq_true, Bool.not_eq_true', List.all_eq_true] at h
-  rcases h with ⟨⟨hw, hpb⟩, hwb⟩
-  refine ⟨hw, ?_, hwb⟩
+  rcases h with ⟨⟨⟨hw, hpb⟩, hwb⟩, hnd⟩
+  refine ⟨hw, ?_, hwb, isNodupPos_sound hnd⟩
   intro hmem
   have : s.boxes.contains s.player = true := List.contains_iff_mem.mpr hmem
   simp_all
@@ -312,6 +364,27 @@ def parseLevel (rows : List String) : Level × State × List Pos :=
       scanRows (y + 1) rest p' b' pl'
   let (player, boxes, playable) := scanRows 0 grid (0, 0) [] []
   (L, { player := player, boxes := boxes }, playable)
+
+private def isValidXsbChar (c : Char) : Bool :=
+  c == '#' || c == '@' || c == '+' || c == '$' || c == '*' || c == '.' || c == ' '
+
+/--
+Strict XSB board parser rejecting empty grids, unknown characters, missing/multiple players,
+zero boxes, and mismatched box/goal counts.
+-/
+def parseLevelStrict (rows : List String) : Option (Level × State × List Pos) :=
+  if rows.isEmpty then none
+  else
+    let chars := rows.foldl (fun acc r => acc ++ r.toList) []
+    if !chars.all isValidXsbChar then none
+    else
+      let players := (chars.filter (fun c => c == '@' || c == '+')).length
+      let boxes := (chars.filter (fun c => c == '$' || c == '*')).length
+      let goals := (chars.filter (fun c => c == '.' || c == '+' || c == '*')).length
+      if players == 1 && boxes >= 1 && boxes == goals then
+        some (parseLevel rows)
+      else
+        none
 
 end Parser
 
